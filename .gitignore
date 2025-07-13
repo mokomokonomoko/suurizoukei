@@ -1,0 +1,17 @@
+# Python 仮想環境
+pose_detection/pose_env/
+
+# Python キャッシュ
+__pycache__/
+*.pyc
+
+# MacOS ゴミファイル
+.DS_Store
+
+# Processing コンパイルキャッシュ
+*.class
+
+pose_detection/pose_env/
+__pycache__/
+*.pyc
+.DS_Store
