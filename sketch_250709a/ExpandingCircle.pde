@@ -2,34 +2,27 @@ class ExpandingCircle {
   PVector pos;
   float radius;
   float maxRadius;
-  float alpha;
-  float growth;
-  float fadeSpeed;
-  color col;
-
-  ExpandingCircle(PVector position, float startRadius, float maxRadius, color col) {
-    this.pos = position.copy();
-    this.radius = startRadius;
+  color c;
+  
+  ExpandingCircle(PVector pos, float radius, float maxRadius, color c) {
+    this.pos = pos.copy();
+    this.radius = radius;
     this.maxRadius = maxRadius;
-    this.alpha = 255;
-    this.growth = 2.5;
-    this.fadeSpeed = 3.0;
-    this.col = col;
+    this.c = c;
   }
-
+  
   void update() {
-    radius += growth;
-    alpha -= fadeSpeed;
+    radius += 4;
   }
-
+  
   void display() {
     noFill();
-    stroke(col, alpha);
-    strokeWeight(2);
+    stroke(c, map(radius, 0, maxRadius, 150, 0));
+    strokeWeight(3);
     ellipse(pos.x, pos.y, radius * 2, radius * 2);
   }
-
+  
   boolean isDead() {
-    return alpha <= 0 || radius > maxRadius;
+    return radius > maxRadius;
   }
 }

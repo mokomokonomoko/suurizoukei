@@ -1,65 +1,84 @@
 import cv2
 import mediapipe as mp
-from pythonosc import udp_client
-import numpy as np
+from pythonosc.udp_client import SimpleUDPClient
+import time
 
-class PoseDetector:
-    def __init__(self, osc_ip="127.0.0.1", osc_port=12000):
-        # MediaPipeの設定
-        self.mp_pose = mp.solutions.pose
-        self.pose = self.mp_pose.Pose(
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-        self.mp_draw = mp.solutions.drawing_utils
-        
-        # OSCクライアントの設定
-        self.osc_client = udp_client.SimpleUDPClient(osc_ip, osc_port)
-        
-        # カメラの設定
-        self.cap = cv2.VideoCapture(0)
-        
-    def run(self):
-        while self.cap.isOpened():
-            success, image = self.cap.read()
-            if not success:
-                print("カメラからの映像の取得に失敗しました。")
-                continue
+# OSC送信先
+client = SimpleUDPClient("127.0.0.1", 12000)
 
-            # 画像をRGBに変換
-            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            
-            # ポーズ検出の実行
-            results = self.pose.process(image_rgb)
-            
-            if results.pose_landmarks:
-                # 右手首のランドマークを取得 (x, y座標は0-1の範囲で正規化済み)
-                right_wrist = results.pose_landmarks.landmark[self.mp_pose.PoseLandmark.RIGHT_WRIST]
-                
-                # OSCで座標を送信
-                self.osc_client.send_message("/wrist", [right_wrist.x, right_wrist.y])
-                
-                # ランドマークの描画
-                self.mp_draw.draw_landmarks(
-                    image, 
-                    results.pose_landmarks, 
-                    self.mp_pose.POSE_CONNECTIONS
-                )
-                
-                # 座標をコンソールに表示（デバッグ用）
-                print(f"Right Wrist - x: {right_wrist.x:.3f}, y: {right_wrist.y:.3f}")
-            
-            # 画面表示
-            cv2.imshow('MediaPipe Pose', cv2.flip(image, 1))
-            
-            # ESCキーで終了
-            if cv2.waitKey(5) & 0xFF == 27:
-                break
-                
-    def __del__(self):
-        self.cap.release()
-        cv2.destroyAllWindows()
+# MediaPipe Pose
+mp_pose = mp.solutions.pose
+pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
-if __name__ == "__main__":
-    detector = PoseDetector()
-    detector.run()
+cap = cv2.VideoCapture(0)
+
+# ジャンプ検知用
+y_history = []
+last_jump_time = 0
+
+
+y_last = None  # 前フレーム記憶
+
+def is_jump(y):
+    global y_history, last_jump_time, y_last
+    y_history.append(y)
+    if len(y_history) > 10:
+        y_history.pop(0)
+
+    y_min = min(y_history)
+    y_max = max(y_history)
+    y_now = y_history[-1]
+    dy_total = y_now - y_min
+
+    # 前回との差分
+    dy_instant = abs(y_now - y_last) if y_last is not None else 0
+    y_last = y_now
+
+    cooldown = time.time() - last_jump_time
+    print(f"y: {y_now:.3f}, dy_total: {dy_total:.3f}, dy_instant: {dy_instant:.3f}, cooldown: {cooldown:.2f}")
+
+    if dy_total > 0.08 and dy_instant > 0.04 and cooldown > 3.0:
+        y_history = []
+        last_jump_time = time.time()
+        return True
+    return False
+
+
+
+
+while cap.isOpened():
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = pose.process(frame_rgb)
+
+    if results.pose_landmarks:
+        landmarks = results.pose_landmarks.landmark
+        hips_y = [
+            landmarks[mp_pose.PoseLandmark.LEFT_HIP].y,
+            landmarks[mp_pose.PoseLandmark.RIGHT_HIP].y
+        ]
+        knees_y = [
+            landmarks[mp_pose.PoseLandmark.LEFT_KNEE].y,
+            landmarks[mp_pose.PoseLandmark.RIGHT_KNEE].y
+        ]
+
+        avg_y = (sum(hips_y) + sum(knees_y)) / 4  # 腰と膝の平均
+        if is_jump(avg_y):
+            print("JUMP DETECTED")
+            client.send_message("/jump", 1)
+
+        annotated = frame.copy()
+        mp.solutions.drawing_utils.draw_landmarks(
+            annotated, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+        cv2.imshow("Pose", annotated)
+    else:
+        cv2.imshow("Pose", frame)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
